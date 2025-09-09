@@ -47,7 +47,7 @@ if uploaded_file:
         result = forecasts[0]
         for f in forecasts[1:]:
             result = pd.merge(result, f, on='ds', how='outer')
-        result = result[result['ds'].between(start_date, end_date)]
+        result = result[result['ds'].between(pd.to_datetime(start_date), pd.to_datetime(end_date))]
         result['합계'] = result[거래처컬럼].sum(axis=1)
         result_display = result.copy()
         for col in 거래처컬럼 + ['합계']:
