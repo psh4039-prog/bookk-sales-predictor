@@ -52,3 +52,4 @@ if uploaded_file:
         st.subheader("📉 트렌드 구성 요소")
         fig2 = model.plot_components(forecast)
         st.pyplot(fig2)
+Delete old predict_sales.py
