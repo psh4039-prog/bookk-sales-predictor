@@ -33,8 +33,8 @@ if uploaded_file:
         model.fit(df_prophet)
 
         future = model.make_future_dataframe(
-            periods=(end_date - df_prophet['ds'].max()).days + 1,
-            freq='D'
+    periods=(pd.to_datetime(end_date) - pd.to_datetime(df_prophet['ds'].max())).days + 1,
+    freq='D'
         )
 
         forecast = model.predict(future)
