@@ -23,28 +23,34 @@ end_date = st.sidebar.date_input("예측 종료일", pd.to_datetime("2025-12-31"
 
 # --- 데이터 전처리 함수 ---
 def preprocess_excel(uploaded_file):
-    # 엑셀 파일 불러오기 (시트 이름 자동 감지 또는 첫 번째 시트)
-    df = pd.read_excel(uploaded_file, sheet_name=0)
+    # 엑셀 데이터 불러오기
+    df = pd.read_excel(uploaded_file, sheet_name=0, header=1)
 
-    # '일자' 열을 datetime 형식으로 변환
-    df['일자'] = pd.to_datetime(df['일자'])
+    # 모든 컬럼 이름에서 공백 제거
+    df.columns = df.columns.str.strip()
 
-    # 컬럼 이름 정리 (예: '전체', '교보문고', '알라딘' 등 거래처명 추출)
-    clients = df.columns[1:]  # 첫 번째 열 '일자' 제외
+    # '일자' 또는 '날짜' 컬럼 탐색
+    date_col = None
+    for col in df.columns:
+        if '일자' in col or '날짜' in col or 'date' in col.lower():
+            date_col = col
+            break
 
-    # melt 구조로 변환: 일자, 거래처, 매출액
-    df_melted = df.melt(id_vars='일자', value_vars=clients, var_name='거래처', value_name='매출액')
+    if date_col is None:
+        raise ValueError("엑셀 파일에 '일자' 또는 '날짜'라는 이름의 열이 존재하지 않습니다.")
 
-    # 결측값 처리
+    # 일자 컬럼을 datetime으로 변환
+    df[date_col] = pd.to_datetime(df[date_col])
+
+    # melt 구조로 변환 (일자를 제외한 나머지 컬럼은 거래처)
+    clients = df.columns.drop(date_col)
+    df_melted = df.melt(id_vars=date_col, value_vars=clients, var_name='거래처', value_name='매출액')
+
+    # 결측값 제거
     df_melted.dropna(subset=['매출액'], inplace=True)
 
-    # 날짜 기준 정렬
-    df_melted.sort_values(by='일자', inplace=True)
-
-    # Prophet에 필요한 컬럼명으로 변경
-    df_melted.rename(columns={'일자': 'ds', '매출액': 'y'}, inplace=True)
-
-    # 천 단위 정수로 변환 (예: 1,200,000)
+    # 컬럼명 Prophet 형식으로 맞추기
+    df_melted.rename(columns={date_col: 'ds', '매출액': 'y'}, inplace=True)
     df_melted['y'] = df_melted['y'].astype(float).round()
     return df_melted
 
