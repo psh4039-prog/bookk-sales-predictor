@@ -22,41 +22,30 @@ start_date = st.sidebar.date_input("예측 시작일", pd.to_datetime("today"))
 end_date = st.sidebar.date_input("예측 종료일", pd.to_datetime("2025-12-31"))
 
 # --- 데이터 전처리 함수 ---
-def preprocess_excel(file):
-    df = pd.read_excel(file, sheet_name=0, header=None)
-    month_labels = df.iloc[1, 2:14].tolist()
-    df_pg = df.iloc[2:6, 1:14]
-    df_pg.columns = ['연도'] + month_labels
-    df_melted = df_pg.melt(id_vars='연도', var_name='월', value_name='매출')
-    df_melted.dropna(inplace=True)
-    import numpy as np  # 이게 없다면 맨 위에서 함께 추가
-
 def preprocess_excel(uploaded_file):
-    ...
-    df = pd.read_excel(uploaded_file, ...)
-    
-    df_melted = pd.melt(df, id_vars=['거래처'], var_name='월', value_name='매출')
+    # 엑셀 파일 불러오기 (시트 이름 자동 감지 또는 첫 번째 시트)
+    df = pd.read_excel(uploaded_file, sheet_name=0)
 
-    df_melted['월'] = (
-        df_melted['월']
-        .astype(str)
-        .str.replace('월', '', regex=False)
-        .str.strip()
-        .replace('', np.nan)
-        .dropna()
-        .astype(int)
-    )
-    ...
+    # '일자' 열을 datetime 형식으로 변환
+    df['일자'] = pd.to_datetime(df['일자'])
 
-    ...
+    # 컬럼 이름 정리 (예: '전체', '교보문고', '알라딘' 등 거래처명 추출)
+    clients = df.columns[1:]  # 첫 번째 열 '일자' 제외
 
-    df_melted['연도'] = df_melted['연도'].astype(int)
-    df_melted['ds'] = pd.to_datetime(
-        df_melted.rename(columns={'연도': 'year', '월': 'month'}).assign(day=1)[['year', 'month', 'day']]
-    )
-    df_melted = df_melted.rename(columns={'매출': 'y'})[['ds', 'y']]
-    df_melted['y'] = df_melted['y'].astype(float)
-    df_melted.sort_values('ds', inplace=True)
+    # melt 구조로 변환: 일자, 거래처, 매출액
+    df_melted = df.melt(id_vars='일자', value_vars=clients, var_name='거래처', value_name='매출액')
+
+    # 결측값 처리
+    df_melted.dropna(subset=['매출액'], inplace=True)
+
+    # 날짜 기준 정렬
+    df_melted.sort_values(by='일자', inplace=True)
+
+    # Prophet에 필요한 컬럼명으로 변경
+    df_melted.rename(columns={'일자': 'ds', '매출액': 'y'}, inplace=True)
+
+    # 천 단위 정수로 변환 (예: 1,200,000)
+    df_melted['y'] = df_melted['y'].astype(float).round()
     return df_melted
 
 # --- 예측 함수 ---
