@@ -111,32 +111,7 @@ def predict_sales(df, start_date, end_date):
 
     return df_result
 
-def display_daily_summary(df_result):
-    st.subheader("📊 예측 요약 (일자별)")
 
-    # 날짜 정렬
-    df_result = df_result.sort_values("ds")
-
-    # 피벗: 날짜 기준, 거래처별 예측 매출 집계
-    pivot_df = df_result.pivot_table(index='ds', columns='거래처', values='yhat', aggfunc='sum').fillna(0)
-    pivot_df['예측 매출'] = pivot_df.sum(axis=1)
-
-    # 숫자 포맷
-    display_df = pivot_df.copy()
-    for col in display_df.columns:
-        display_df[col] = display_df[col].apply(lambda x: f"{int(x):,}")
-
-    # 표 출력
-    st.dataframe(display_df.reset_index().rename(columns={'ds': '날짜'}), use_container_width=True)
-
-    # 하단 요약 출력
-    st.markdown("### 📌 거래처별 예측 매출 합계")
-    total_by_client = pivot_df.sum().drop("예측 매출")
-    total_all = pivot_df["예측 매출"].sum()
-
-    for client, total in total_by_client.items():
-        st.markdown(f"- **{client}**: {int(total):,} 원")
-    st.markdown(f"### ✅ 전체 합계: **{int(total_all):,} 원**")
 
 # --- 시각화 함수 ---
 def plot_forecast(forecast):
@@ -186,3 +161,30 @@ else:
 xls = pd.ExcelFile(uploaded_file)
 sheet_name = xls.sheet_names[0]  # 첫 시트 이름 가져오기
 df = pd.read_excel(xls, sheet_name=sheet_name)
+
+def display_daily_summary(df_result):
+    st.subheader("📊 예측 요약 (일자별)")
+
+    # 날짜 정렬
+    df_result = df_result.sort_values("ds")
+
+    # 피벗: 날짜 기준, 거래처별 예측 매출 집계
+    pivot_df = df_result.pivot_table(index='ds', columns='거래처', values='yhat', aggfunc='sum').fillna(0)
+    pivot_df['예측 매출'] = pivot_df.sum(axis=1)
+
+    # 숫자 포맷
+    display_df = pivot_df.copy()
+    for col in display_df.columns:
+        display_df[col] = display_df[col].apply(lambda x: f"{int(x):,}")
+
+    # 표 출력
+    st.dataframe(display_df.reset_index().rename(columns={'ds': '날짜'}), use_container_width=True)
+
+    # 하단 요약 출력
+    st.markdown("### 📌 거래처별 예측 매출 합계")
+    total_by_client = pivot_df.sum().drop("예측 매출")
+    total_all = pivot_df["예측 매출"].sum()
+
+    for client, total in total_by_client.items():
+        st.markdown(f"- **{client}**: {int(total):,} 원")
+    st.markdown(f"### ✅ 전체 합계: **{int(total_all):,} 원**")
