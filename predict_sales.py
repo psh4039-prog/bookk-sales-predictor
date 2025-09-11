@@ -5,7 +5,7 @@ from prophet import Prophet
 import plotly.express as px
 
 # 페이지 설정
-st.set_page_config(page_title="부크크 매주 예측기", layout="wide")
+st.set_page_config(page_title="Bookk Sales Predictor", layout="wide")
 st.title("\ud83d\udcc8 \ubd80\ud06c\ud06c \ub9e4주 \uc608\uce21\uae30")
 
 # --- 초기 상태 설정 ---
