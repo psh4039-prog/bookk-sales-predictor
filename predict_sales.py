@@ -37,55 +37,63 @@ def preprocess_excel(uploaded_file):
     return df_melted
 
 # --- 예측 함수 ---
-def predict_sales(df: pd.DataFrame, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+def predict_sales(df, start_date, end_date):
+    """
+    Prophet 모델을 기반으로 입력된 df 데이터에 대해 start_date ~ end_date까지 예측 수행
+    - df: DataFrame (컬럼: ds, y, 거래처)
+    - start_date, end_date: datetime 형식
+    """
+    import pandas as pd
+    from prophet import Prophet
+
+    # 날짜 형식 보장
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
+
+    # Prophet 결과 저장 리스트
     all_forecasts = []
 
-    if '거래처' in df.columns:
-        clients = df['거래처'].unique()
-    else:
-        clients = [None]
+    # 전체 혹은 거래처별 그룹
+    group_cols = df['거래처'].unique() if '거래처' in df.columns else [None]
 
-    for client in clients:
-        df_client = df[df['거래처'] == client] if client else df.copy()
-        if df_client.empty:
+    for client in group_cols:
+        if client is not None:
+            df_group = df[df['거래처'] == client][['ds', 'y']].copy()
+        else:
+            df_group = df[['ds', 'y']].copy()
+
+        # 2개 미만의 유효 데이터는 예측 불가
+        if df_group.dropna().shape[0] < 2:
             continue
 
-        if client == "교보문고":
-            df_client['ds'] = pd.to_datetime(df_client['ds'])
-            df_client['ds'] = df_client['ds'].dt.to_period("M").dt.to_timestamp()
-            df_monthly = df_client.groupby('ds').agg({'y': 'sum'}).reset_index()
+        df_group = df_group.sort_values('ds')
+        model = Prophet()
+        model.fit(df_group)
 
-            last_train_date = df_monthly['ds'].max()
-            period_months = (end_date.to_period("M") - last_train_date.to_period("M")).n + 1
-            if period_months <= 0:
-                continue
+        # 예측 기간 계산
+        last_date = pd.to_datetime(df_group['ds'].max())
+        period_days = max((end_date - last_date).days, 1)  # 최소 1일 이상 보장
 
-            model = Prophet()
-            model.fit(df_monthly)
-            future_df = model.make_future_dataframe(periods=period_months, freq='MS')
-            forecast = model.predict(future_df)
-        else:
-            df_client = df_client.sort_values('ds')
-            last_date = df_client['ds'].max()
-            period_days = max((end_date - last_date).days, 1)
+        # 미래 예측 프레임 생성
+        future = model.make_future_dataframe(periods=period_days, freq='D')
+        forecast = model.predict(future)
 
-            model = Prophet()
-            model.fit(df_client)
-            future_df = model.make_future_dataframe(periods=period_days, freq='D')
-            forecast = model.predict(future_df)
+        # 필요한 컬럼 추출
+        result = forecast[['ds', 'yhat']].copy()
+        result = result[result['ds'].between(start_date, end_date)]
+        result['yhat'] = result['yhat'].round().astype(int)
 
-        forecast_filtered = forecast[forecast['ds'].between(start_date, end_date)][['ds', 'yhat']].copy()
-        forecast_filtered['yhat'] = forecast_filtered['yhat'].round().astype(int)
-        if client:
-            forecast_filtered['거래처'] = client
-        all_forecasts.append(forecast_filtered)
+        # ✅ 거래처 정보 반드시 추가
+        if client is not None:
+            result['거래처'] = client
 
-    if not all_forecasts:
-        return pd.DataFrame(columns=['ds', 'yhat', '거래처'])
+        all_forecasts.append(result)
 
-    return pd.concat(all_forecasts).reset_index(drop=True)
+    # 예측 결과 통합
+    df_result = pd.concat(all_forecasts).reset_index(drop=True) if all_forecasts else pd.DataFrame()
+
+    return df_result
+
 
     # 과거 매출은 엑셀 데이터로 덮어쓰기
     df_merged = df_result.merge(df, on=["ds", "거래처"], how="left", suffixes=("_pred", ""))
