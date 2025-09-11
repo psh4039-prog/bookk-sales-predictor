@@ -37,52 +37,55 @@ def preprocess_excel(uploaded_file):
     return df_melted
 
 # --- 예측 함수 ---
-def predict_sales(df, start_date, end_date):
+def predict_sales(df: pd.DataFrame, start_date: datetime, end_date: datetime) -> pd.DataFrame:
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
     all_forecasts = []
-    client_list = df['거래처'].unique()
 
-    for client in client_list:
-        df_group = df[df['거래처'] == client][['ds', 'y']].copy().sort_values('ds')
+    if '거래처' in df.columns:
+        clients = df['거래처'].unique()
+    else:
+        clients = [None]
+
+    for client in clients:
+        df_client = df[df['거래처'] == client] if client else df.copy()
+        if df_client.empty:
+            continue
 
         if client == "교보문고":
-            df_group['월'] = df_group['ds'].dt.to_period("M")
-            monthly_sum = df_group.groupby('월')['y'].sum().reset_index()
-            monthly_sum['ds'] = monthly_sum['월'].dt.to_timestamp()
-            prophet_df = monthly_sum[['ds', 'y']]
-            model = Prophet()
-            model.fit(prophet_df)
-            future_months = pd.date_range(start=prophet_df['ds'].max(), end=end_date, freq='MS')
-            future_df = pd.DataFrame({'ds': future_months})
-            forecast_monthly = model.predict(future_df)
-            forecast_monthly = forecast_monthly[['ds', 'yhat']].copy()
-            forecast_monthly['yhat'] = forecast_monthly['yhat'].round()
+            df_client['ds'] = pd.to_datetime(df_client['ds'])
+            df_client['ds'] = df_client['ds'].dt.to_period("M").dt.to_timestamp()
+            df_monthly = df_client.groupby('ds').agg({'y': 'sum'}).reset_index()
 
-            # 월 예측값 → 평일 일수로 분배
-            all_days = pd.date_range(start=start_date, end=end_date, freq='D')
-            for _, row in forecast_monthly.iterrows():
-                month = row['ds'].strftime('%Y-%m')
-                days_in_month = [d for d in all_days if d.strftime('%Y-%m') == month and d.weekday() < 5]
-                if not days_in_month:
-                    continue
-                daily_yhat = int(row['yhat']) // len(days_in_month)
-                for d in days_in_month:
-                    all_forecasts.append({'ds': d, 'yhat': daily_yhat, '거래처': client})
+            last_train_date = df_monthly['ds'].max()
+            period_months = (end_date.to_period("M") - last_train_date.to_period("M")).n + 1
+            if period_months <= 0:
+                continue
+
+            model = Prophet()
+            model.fit(df_monthly)
+            future_df = model.make_future_dataframe(periods=period_months, freq='MS')
+            forecast = model.predict(future_df)
         else:
-            model = Prophet()
-            model.fit(df_group)
-            last_date = df_group['ds'].max()
+            df_client = df_client.sort_values('ds')
+            last_date = df_client['ds'].max()
             period_days = max((end_date - last_date).days, 1)
-            future = model.make_future_dataframe(periods=period_days, freq='D')
-            forecast = model.predict(future)
-            result = forecast[['ds', 'yhat']]
-            result = result[result['ds'].between(start_date, end_date)]
-            result['yhat'] = result['yhat'].round()
-            result['거래처'] = client
-            all_forecasts.extend(result.to_dict(orient='records'))
 
-    df_result = pd.DataFrame(all_forecasts)
+            model = Prophet()
+            model.fit(df_client)
+            future_df = model.make_future_dataframe(periods=period_days, freq='D')
+            forecast = model.predict(future_df)
+
+        forecast_filtered = forecast[forecast['ds'].between(start_date, end_date)][['ds', 'yhat']].copy()
+        forecast_filtered['yhat'] = forecast_filtered['yhat'].round().astype(int)
+        if client:
+            forecast_filtered['거래처'] = client
+        all_forecasts.append(forecast_filtered)
+
+    if not all_forecasts:
+        return pd.DataFrame(columns=['ds', 'yhat', '거래처'])
+
+    return pd.concat(all_forecasts).reset_index(drop=True)
 
     # 과거 매출은 엑셀 데이터로 덮어쓰기
     df_merged = df_result.merge(df, on=["ds", "거래처"], how="left", suffixes=("_pred", ""))
