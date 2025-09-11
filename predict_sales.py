@@ -33,6 +33,10 @@ def preprocess_excel(file):
 
 def preprocess_excel(uploaded_file):
     ...
+    df = pd.read_excel(uploaded_file, ...)
+    
+    df_melted = pd.melt(df, id_vars=['거래처'], var_name='월', value_name='매출')
+
     df_melted['월'] = (
         df_melted['월']
         .astype(str)
@@ -42,6 +46,8 @@ def preprocess_excel(uploaded_file):
         .dropna()
         .astype(int)
     )
+    ...
+
     ...
 
     df_melted['연도'] = df_melted['연도'].astype(int)
