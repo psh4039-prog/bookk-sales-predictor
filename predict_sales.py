@@ -96,17 +96,41 @@ def predict_sales(df: pd.DataFrame, start_date: datetime, end_date: datetime) ->
 
 # --- 일자별 요약 표시 ---
 def display_summary_table(forecast_df):
-    st.subheader("📊 예측 요약")
-    pivot_df = forecast_df.pivot_table(index='ds', columns='거래처', values='yhat_final', aggfunc='sum').fillna(0)
-    display_df = pivot_df.copy().astype(int).applymap(lambda x: f"{x:,}")
+    st.subheader("📊 예측 요약 (일자별 × 거래처별)")
+
+    if '거래처' not in forecast_df.columns:
+        st.warning("⚠ 예측 결과에 '거래처' 정보가 없습니다. 거래처별 요약이 불가능합니다.")
+        return
+
+    # 날짜 정렬
+    forecast_df = forecast_df.sort_values("ds")
+
+    # 예측값 정수로 변환
+    forecast_df['yhat'] = forecast_df['yhat'].round().astype(int)
+
+    # 일자별 × 거래처별 피벗 테이블 생성
+    pivot_df = forecast_df.pivot_table(index='ds', columns='거래처', values='yhat', aggfunc='sum').fillna(0)
+
+    # 총합 열 추가
+    pivot_df['총합'] = pivot_df.sum(axis=1)
+
+    # 숫자 포맷 적용 (쉼표 단위로)
+    display_df = pivot_df.copy()
+    display_df = display_df.applymap(lambda x: f"{int(x):,}")
+
+    # 표 출력
     st.dataframe(display_df.reset_index().rename(columns={'ds': '날짜'}), use_container_width=True)
 
-    st.markdown("---")
-    st.markdown("### ✅ 거래처별 및 전체 합계")
-    totals = pivot_df.sum()
-    for client, val in totals.items():
-        st.markdown(f"- **{client}**: {int(val):,} 원")
-    st.markdown(f"### 📌 전체 합계: **{int(totals.sum()):,} 원**")
+    # 거래처별 합계 출력
+    st.markdown("### 📌 거래처별 예측 매출 합계")
+    total_by_client = pivot_df.drop(columns='총합').sum()
+    total_all = pivot_df['총합'].sum()
+
+    for client, total in total_by_client.items():
+        st.markdown(f"- **{client}**: {int(total):,} 원")
+
+    st.markdown(f"### ✅ 전체 합계: **{int(total_all):,} 원**")
+
 
 # --- 실행 ---
 if uploaded_file:
