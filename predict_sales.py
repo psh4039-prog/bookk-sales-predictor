@@ -149,6 +149,7 @@ if uploaded_file:
     forecast = predict_sales(df_library, start_date, end_date)
     forecast['예측 매출'] = forecast['yhat'].astype(int).map("{:,}".format)
 
+    display_daily_summary(forecast)    
     st.subheader("📊 예측 요약 (일자별)")
     st.dataframe(forecast[['ds', '예측 매출']].rename(columns={'ds': '날짜'}), use_container_width=True)
 
