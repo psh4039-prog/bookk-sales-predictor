@@ -47,29 +47,68 @@ def predict_sales(df, start_date, end_date):
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
     all_forecasts = []
+
     if '거래처' in df.columns:
         group_cols = df['거래처'].unique()
     else:
         group_cols = [None]
+
     for client in group_cols:
         if client is not None:
             df_group = df[df['거래처'] == client][['ds', 'y']].copy()
         else:
             df_group = df[['ds', 'y']].copy()
+
         df_group = df_group.sort_values('ds')
-        model = Prophet()
-        model.fit(df_group)
-        last_date = pd.to_datetime(df_group['ds'].max())
-        period_days = max((end_date - last_date).days, 1)
-        future = model.make_future_dataframe(periods=period_days, freq='D')
-        forecast = model.predict(future)
-        result = forecast[['ds', 'yhat']].copy()
-        result = result[result['ds'].between(start_date, end_date)]
-        result.dropna(subset=['yhat'], inplace=True)
-        result['yhat'] = result['yhat'].round().astype(int)
-        if client is not None:
-            result['거래처'] = client
-        all_forecasts.append(result)
+
+        # 📌 교보문고는 월 단위로 예측하고 일별로 분배
+        if client == "교보문고":
+            df_group['ds'] = pd.to_datetime(df_group['ds'])
+            df_group['월'] = df_group['ds'].dt.to_period('M')
+            df_monthly = df_group.groupby('월').agg({'y': 'sum'}).reset_index()
+            df_monthly['ds'] = df_monthly['월'].dt.to_timestamp()
+
+            model = Prophet()
+            model.fit(df_monthly[['ds', 'y']])
+
+            future_months = model.make_future_dataframe(
+                periods=((end_date.to_period('M') - df_monthly['월'].max()).n + 1),
+                freq='M'
+            )
+            forecast_monthly = model.predict(future_months)
+            forecast_monthly = forecast_monthly[['ds', 'yhat']]
+            forecast_monthly = forecast_monthly[forecast_monthly['ds'].between(start_date, end_date)]
+
+            # 📌 예측된 월별 매출을 일별로 균등 분배
+            distributed = []
+            for _, row in forecast_monthly.iterrows():
+                month_start = row['ds'].replace(day=1)
+                next_month = (month_start + pd.offsets.MonthBegin(1))
+                days_in_month = (next_month - month_start).days
+                daily_value = row['yhat'] / days_in_month
+                for i in range(days_in_month):
+                    date = month_start + pd.Timedelta(days=i)
+                    if start_date <= date <= end_date:
+                        distributed.append({'ds': date, 'yhat': round(daily_value), '거래처': client})
+
+            df_result = pd.DataFrame(distributed)
+            all_forecasts.append(df_result)
+
+        else:
+            model = Prophet()
+            model.fit(df_group)
+            last_date = pd.to_datetime(df_group['ds'].max())
+            period_days = max((end_date - last_date).days, 1)
+            future = model.make_future_dataframe(periods=period_days, freq='D')
+            forecast = model.predict(future)
+            result = forecast[['ds', 'yhat']].copy()
+            result = result[result['ds'].between(start_date, end_date)]
+            result.dropna(subset=['yhat'], inplace=True)
+            result['yhat'] = result['yhat'].round().astype(int)
+            if client is not None:
+                result['거래처'] = client
+            all_forecasts.append(result)
+
     df_result = pd.concat(all_forecasts).reset_index(drop=True)
     return df_result
 
