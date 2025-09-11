@@ -98,19 +98,33 @@ def display_daily_summary(df_result):
 
     st.subheader("📊 예측 요약 (일자별)")
     df_result = df_result.sort_values("ds")
+
+    # 피벗 테이블 생성
     pivot_df = df_result.pivot_table(index='ds', columns='거래처', values='yhat', aggfunc='sum').fillna(0)
+
+    # 정확한 합계 계산 (숫자 기준)
     pivot_df['합계'] = pivot_df.sum(axis=1)
+
+    # 표시용 복사본 생성
     display_df = pivot_df.copy()
+
+    # 숫자 포맷 적용
     for col in display_df.columns:
-        display_df[col] = display_df[col].apply(lambda x: f"{int(x):,}")
+        display_df[col] = display_df[col].apply(lambda x: f"{int(round(x)):,}")
+
+    # 테이블 출력
     st.dataframe(display_df.reset_index().rename(columns={'ds': '날짜'}), use_container_width=True)
 
+    # 하단 합계 출력
     st.markdown("### 📌 거래처별 예측 매출 합계")
-    total_by_client = pivot_df.sum().drop("합계")
-    total_all = pivot_df["합계"].sum()
+
+    total_by_client = pivot_df.drop(columns='합계').sum()
+    total_all = pivot_df['합계'].sum()
+
     for client, total in total_by_client.items():
-        st.markdown(f"- **{client}**: {int(total):,} 원")
-    st.markdown(f"### ✅ 전체 합계: **{int(total_all):,} 원**")
+        st.markdown(f"- **{client}**: {int(round(total)):,} 원")
+
+    st.markdown(f"### ✅ 전체 합계: **{int(round(total_all)):,} 원**")
 
 # --- 다운로드 버튼 ---
 def download_excel(df_result):
