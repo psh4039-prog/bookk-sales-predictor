@@ -78,7 +78,18 @@ def predict_sales(df, start_date, end_date):
             model = Prophet()
             model.fit(df_client[['ds', 'y']].sort_values('ds'))
 
-            future = model.make_future_dataframe(periods=(end_date - df_client['ds'].max()).days, freq='D')
+            days_to_predict = (end_date - df_client['ds'].max()).days
+
+if days_to_predict > 0:
+    future = model.make_future_dataframe(periods=days_to_predict, freq='D')
+    forecast = model.predict(future)[['ds', 'yhat']]
+    forecast = forecast[(forecast['ds'] >= start_date) & (forecast['ds'] <= end_date)]
+    forecast['yhat_final'] = forecast['yhat'].clip(lower=0).round()
+    forecast['거래처'] = client
+    forecast_df = forecast[['ds', '거래처', 'yhat_final']]
+else:
+    # 예측할 기간이 없음 → 빈 데이터프레임 반환
+    forecast_df = pd.DataFrame(columns=['ds', '거래처', 'yhat_final'])
             forecast = model.predict(future)[['ds', 'yhat']]
             forecast = forecast[(forecast['ds'] >= start_date) & (forecast['ds'] <= end_date)]
             forecast['yhat_final'] = forecast['yhat'].clip(lower=0).round()
