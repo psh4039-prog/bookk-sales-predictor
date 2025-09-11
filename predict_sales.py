@@ -92,6 +92,7 @@ def predict_sales(df, start_date, end_date):
     return df_result
 
 # --- 예측 요약 ---
+# --- 예측 요약 ---
 def display_daily_summary(df_result):
     if df_result.empty:
         return
@@ -125,6 +126,7 @@ def display_daily_summary(df_result):
         st.markdown(f"- **{client}**: {int(round(total)):,} 원")
 
     st.markdown(f"### ✅ 전체 합계: **{int(round(total_all)):,} 원**")
+
 
 # --- 다운로드 버튼 ---
 def download_excel(df_result):
