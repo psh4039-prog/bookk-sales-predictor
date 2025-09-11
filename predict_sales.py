@@ -58,12 +58,58 @@ def preprocess_excel(uploaded_file):
 
 # --- 예측 함수 ---
 def predict_sales(df, start_date, end_date):
-    model = Prophet()
-    model.fit(df)
-    future = model.make_future_dataframe(periods=(end_date - df['ds'].max()).days, freq='D')
-    forecast = model.predict(future)
-    forecast_filtered = forecast[(forecast['ds'] >= pd.to_datetime(start_date)) & (forecast['ds'] <= pd.to_datetime(end_date))]
-    return forecast_filtered[['ds', 'yhat']]
+    """
+    Prophet 모델을 기반으로 입력된 df 데이터에 대해 start_date ~ end_date까지 예측 수행
+    - df: DataFrame (컬럼: ds, y, 거래처)
+    - start_date, end_date: datetime 형식
+    """
+
+    # 날짜 형식 보장
+    start_date = pd.to_datetime(start_date)
+    end_date = pd.to_datetime(end_date)
+
+    # Prophet 결과 저장 리스트
+    all_forecasts = []
+
+    # 전체 혹은 거래처별 그룹
+    if '거래처' in df.columns:
+        group_cols = df['거래처'].unique()
+    else:
+        group_cols = [None]
+
+    for client in group_cols:
+        if client is not None:
+            df_group = df[df['거래처'] == client][['ds', 'y']].copy()
+        else:
+            df_group = df[['ds', 'y']].copy()
+
+        df_group = df_group.sort_values('ds')
+        model = Prophet()
+        model.fit(df_group)
+
+        # 예측 기간 계산
+        last_date = pd.to_datetime(df_group['ds'].max())
+        period_days = max((end_date - last_date).days, 1)  # 최소 1일 이상 보장
+
+        # 미래 예측 프레임 생성
+        future = model.make_future_dataframe(periods=period_days, freq='D')
+
+        forecast = model.predict(future)
+
+        # 필요한 컬럼 추출
+        result = forecast[['ds', 'yhat']].copy()
+        result = result[result['ds'].between(start_date, end_date)]
+        result['yhat'] = result['yhat'].round().astype(int)
+
+        if client is not None:
+            result['거래처'] = client
+
+        all_forecasts.append(result)
+
+    # 예측 결과 통합
+    df_result = pd.concat(all_forecasts).reset_index(drop=True)
+
+    return df_result
 
 # --- 시각화 함수 ---
 def plot_forecast(forecast):
