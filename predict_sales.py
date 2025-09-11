@@ -5,162 +5,131 @@ from prophet import Prophet
 import plotly.express as px
 from io import BytesIO
 
-st.set_page_config(page_title="부크크 매출 예측기", layout="wide")
-st.title("📉 부크크 매출 예측기")
+st.set_page_config(page_title="📊 부크크 매출 예측기", layout="wide")
+st.title("📈 부크크 매출 예측기")
 
+# 세션 초기화
 if "library_data" not in st.session_state:
     st.session_state.library_data = None
 
-# -----------------------------
-# 🔧 엑셀 업로드
-# -----------------------------
+# --- 사이드바 설정 ---
 st.sidebar.header("1️⃣ 엑셀 업로드")
 uploaded_file = st.sidebar.file_uploader("매출 데이터를 포함한 엑셀 파일을 업로드하세요", type=["xlsx"])
 
-# -----------------------------
-# 🔧 예측 기간 선택
-# -----------------------------
-st.sidebar.header("2️⃣ 예측 기간 선택")
+st.sidebar.header("2️⃣ 예측 기간 설정")
 start_date = st.sidebar.date_input("예측 시작일", pd.to_datetime("today"))
 end_date = st.sidebar.date_input("예측 종료일", pd.to_datetime("2025-12-31"))
-start_date = pd.to_datetime(start_date)
-end_date = pd.to_datetime(end_date)
 
-# -----------------------------
-# 📂 엑셀 전처리
-# -----------------------------
-def preprocess_excel(file):
-    df = pd.read_excel(file, sheet_name=0, header=1)
+# --- 엑셀 전처리 ---
+def preprocess_excel(uploaded_file):
+    df = pd.read_excel(uploaded_file, sheet_name=0, header=1)
     df.columns = df.columns.str.strip()
-    date_col = next((col for col in df.columns if '일자' in col or '날짜' in col), None)
+    date_col = next((col for col in df.columns if "일자" in col or "날짜" in col or "date" in col.lower()), None)
+    if date_col is None:
+        raise ValueError("날짜 또는 일자 컬럼을 찾을 수 없습니다.")
+
     df[date_col] = pd.to_datetime(df[date_col])
-    clients = df.columns.drop(date_col)
-    df_melt = df.melt(id_vars=date_col, value_vars=clients, var_name='거래처', value_name='매출액')
-    df_melt.dropna(subset=['매출액'], inplace=True)
-    df_melt.rename(columns={date_col: 'ds', '매출액': 'y'}, inplace=True)
-    df_melt['y'] = pd.to_numeric(df_melt['y'], errors='coerce').round()
-    df_melt.dropna(subset=['y'], inplace=True)
-    return df_melt
+    df = df.melt(id_vars=[date_col], var_name="거래처", value_name="매출액")
+    df.dropna(subset=["매출액"], inplace=True)
+    df.rename(columns={date_col: "ds", "매출액": "y"}, inplace=True)
+    df["y"] = pd.to_numeric(df["y"], errors="coerce").round()
+    df.dropna(subset=["y"], inplace=True)
+    return df
 
-# -----------------------------
-# 🔮 예측 함수
-# -----------------------------
+# --- 예측 함수 ---
 def predict_sales(df, start_date, end_date):
-    future_df_all = []
+    start_date = pd.to_datetime(start_date)
+    end_date = pd.to_datetime(end_date)
 
-    for client in df['거래처'].unique():
-        df_client = df[df['거래처'] == client].copy()
+    if "거래처" in df.columns:
+        groups = df["거래처"].unique()
+    else:
+        groups = [None]
 
-        # 4-1: 교보문고는 월 단위로 학습
-        if '교보문고' in client:
-            df_client['ds_month'] = df_client['ds'].dt.to_period('M').dt.to_timestamp()
-            df_monthly = df_client.groupby('ds_month')['y'].sum().reset_index().rename(columns={'ds_month': 'ds'})
-            model = Prophet()
-            model.fit(df_monthly)
+    all_forecasts = []
+    for client in groups:
+        df_client = df[df["거래처"] == client][["ds", "y"]] if client else df[["ds", "y"]]
+        df_client = df_client.sort_values("ds")
+        if len(df_client) < 2:
+            continue
 
-            future_month = pd.date_range(start=start_date, end=end_date, freq='MS')
-            future_df = pd.DataFrame({'ds': future_month})
-            forecast = model.predict(future_df)[['ds', 'yhat']]
-            forecast['yhat'] = forecast['yhat'].clip(lower=0)
+        model = Prophet()
+        model.fit(df_client)
 
-            # 일 단위로 분배
-            result = []
-            for _, row in forecast.iterrows():
-                month = row['ds']
-                days_in_month = pd.date_range(month, month + pd.offsets.MonthEnd(0), freq='D')
-                daily_value = row['yhat'] / len(days_in_month)
-                for day in days_in_month:
-                    if start_date <= day <= end_date:
-                        result.append({'ds': day, '거래처': client, 'yhat_final': round(daily_value)})
-            forecast_df = pd.DataFrame(result)
+        last_date = pd.to_datetime(df_client["ds"].max())
+        period_days = max((end_date - last_date).days, 1)
+        future = model.make_future_dataframe(periods=period_days, freq="D")
 
-        else:
-            model = Prophet()
-            model.fit(df_client[['ds', 'y']].sort_values('ds'))
+        forecast = model.predict(future)
+        forecast = forecast[forecast["ds"].between(start_date, end_date)].copy()
+        forecast["yhat"] = forecast["yhat"].round().astype(int)
+        forecast = forecast[["ds", "yhat"]]
+        forecast["거래처"] = client
+        all_forecasts.append(forecast)
 
-            days_to_predict = (end_date - df_client['ds'].max()).days
+    if not all_forecasts:
+        return pd.DataFrame()
 
-if days_to_predict > 0:
-    future = model.make_future_dataframe(periods=days_to_predict, freq='D')
-    forecast = model.predict(future)[['ds', 'yhat']]
-    forecast = forecast[(forecast['ds'] >= start_date) & (forecast['ds'] <= end_date)]
-    forecast['yhat_final'] = forecast['yhat'].clip(lower=0).round()
-    forecast['거래처'] = client
-    forecast_df = forecast[['ds', '거래처', 'yhat_final']]
-else:
-    # 예측할 기간이 없음 → 빈 데이터프레임 반환
-    forecast_df = pd.DataFrame(columns=['ds', '거래처', 'yhat_final'])
-            forecast = model.predict(future)[['ds', 'yhat']]
-            forecast = forecast[(forecast['ds'] >= start_date) & (forecast['ds'] <= end_date)]
-            forecast['yhat_final'] = forecast['yhat'].clip(lower=0).round()
-            forecast['거래처'] = client
-            forecast_df = forecast[['ds', '거래처', 'yhat_final']]
+    result = pd.concat(all_forecasts, ignore_index=True)
+    return result
 
-        future_df_all.append(forecast_df)
+# --- 시각화 ---
+def plot_forecast(forecast_df):
+    fig1 = px.line(forecast_df, x="ds", y="yhat", color="거래처", title="📅 일별 매출 예측")
+    fig2 = px.bar(forecast_df.groupby(forecast_df["ds"].dt.to_period("M")).sum(numeric_only=True).reset_index().rename(columns={"ds": "월"}), 
+                  x="월", y="yhat", title="📊 월별 매출 예측")
+    col1, col2 = st.columns(2)
+    col1.plotly_chart(fig1, use_container_width=True)
+    col2.plotly_chart(fig2, use_container_width=True)
 
-    return pd.concat(future_df_all)
+# --- 요약표 표시 ---
+def display_summary_table(forecast_df):
+    st.markdown("## 📊 예측 요약 (일자별 × 거래처별)")
 
-# -----------------------------
-# 📊 요약 출력
-# -----------------------------
-def display_summary_table(predicted, original, start_date, end_date):
-    st.subheader("📊 예측 요약 (일자별 × 거래처별)")
+    forecast_df = forecast_df.copy()
+    forecast_df = forecast_df.sort_values("ds")
+    pivot_df = forecast_df.pivot_table(index="ds", columns="거래처", values="yhat", aggfunc="sum").fillna(0)
+    pivot_df["총합"] = pivot_df.sum(axis=1)
 
-    # 과거 구간은 원본에서, 미래 구간은 예측에서 병합
-    original_range = original[(original['ds'] >= start_date) & (original['ds'] <= end_date)].copy()
-    original_range.rename(columns={'y': 'yhat_final'}, inplace=True)
-    merged = pd.concat([original_range[['ds', '거래처', 'yhat_final']], predicted])
+    display_df = pivot_df.copy()
+    display_df = display_df.applymap(lambda x: f"{int(x):,}")
+    st.dataframe(display_df.reset_index().rename(columns={"ds": "날짜"}), use_container_width=True)
 
-    pivot = merged.pivot_table(index='ds', columns='거래처', values='yhat_final', aggfunc='sum').fillna(0)
-
-    display = pivot.copy().astype(int).applymap(lambda x: f"{x:,}")
-    st.dataframe(display.reset_index().rename(columns={"ds": "날짜"}), use_container_width=True)
-
-    # 거래처별 합계
+    # 하단 합계
     st.markdown("### 📌 거래처별 예측 매출 합계")
-    total_by_client = pivot.sum()
-    for client, amount in total_by_client.items():
-        st.markdown(f"- **{client}**: {int(amount):,} 원")
-    st.markdown(f"### ✅ 전체 합계: **{int(total_by_client.sum()):,} 원**")
+    total_by_client = pivot_df.sum().drop("총합")
+    total_all = pivot_df["총합"].sum()
+    for client, total in total_by_client.items():
+        st.markdown(f"- **{client}**: {int(total):,} 원")
+    st.markdown(f"✅ **전체 합계**: **{int(total_all):,} 원**")
 
-    # 다운로드 버튼
-    csv = pivot.reset_index().to_csv(index=False).encode("utf-8-sig")
-    st.download_button("📥 예측 결과 다운로드", data=csv, file_name="예측결과.csv", mime="text/csv")
+# --- 파일 다운로드 함수 ---
+def convert_df_to_excel(df):
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name="Forecast")
+    return buffer.getvalue()
 
-# -----------------------------
-# 📉 그래프 출력
-# -----------------------------
-def display_graphs(df):
-    st.subheader("📈 거래처별 매출 예측 그래프")
-
-    pivot = df.pivot_table(index='ds', columns='거래처', values='yhat_final', aggfunc='sum').fillna(0)
-    total_sum = pivot.sum().sum()
-
-    cols = st.columns(2)
-    for i, client in enumerate(pivot.columns):
-        with cols[i % 2]:
-            fig = px.bar(pivot[client].reset_index(), x='ds', y=client,
-                         title=f"{client} 매출 예측",
-                         labels={'ds': '날짜', client: '매출'},
-                         text=pivot[client].apply(lambda x: f"{(x/total_sum*100):.1f}%" if total_sum > 0 else ""))
-            fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
-
-# -----------------------------
-# 🚀 실행
-# -----------------------------
+# --- 실행 영역 ---
 if uploaded_file:
     df_new = preprocess_excel(uploaded_file)
-
     if st.session_state.library_data is None:
         st.session_state.library_data = df_new
     else:
         st.session_state.library_data = pd.concat([st.session_state.library_data, df_new], ignore_index=True)
-        st.session_state.library_data.drop_duplicates(subset=['ds', '거래처'], keep='last', inplace=True)
+        st.session_state.library_data.drop_duplicates(subset=["ds", "거래처"], keep="last", inplace=True)
 
     original_data = st.session_state.library_data.copy()
     forecast_data = predict_sales(original_data, start_date, end_date)
-    display_summary_table(forecast_data, original_data, start_date, end_date)
-    display_graphs(forecast_data)
+
+    if forecast_data.empty:
+        st.warning("❌ 예측 가능한 데이터가 부족합니다.")
+    else:
+        forecast_data["예측 매출"] = forecast_data["yhat"].map("{:,}".format)
+        display_summary_table(forecast_data)
+        st.markdown("## 📥 예측 결과 다운로드")
+        excel_bytes = convert_df_to_excel(forecast_data)
+        st.download_button("📥 예측 결과 다운로드", data=excel_bytes, file_name="forecast_result.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        plot_forecast(forecast_data)
 else:
-    st.info("👈 왼쪽 사이드바에서 엑셀 파일을 업로드하세요.")
+    st.info("👈 왼쪽에서 엑셀 파일을 업로드해주세요.")
