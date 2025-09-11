@@ -112,3 +112,7 @@ if uploaded_file:
 else:
     st.info("👈 왼쪽 사이드바에서 엑셀 파일을 업로드하세요.")
 
+# 시트 자동 감지
+xls = pd.ExcelFile(uploaded_file)
+sheet_name = xls.sheet_names[0]  # 첫 시트 이름 가져오기
+df = pd.read_excel(xls, sheet_name=sheet_name)
