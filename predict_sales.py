@@ -52,8 +52,8 @@ def preprocess_excel(uploaded_file):
     # 컬럼명 Prophet 형식으로 맞추기
     df_melted.rename(columns={date_col: 'ds', '매출액': 'y'}, inplace=True)
     df_melted['y'] = pd.to_numeric(df_melted['y'], errors='coerce')
-df_melted.dropna(subset=['y'], inplace=True)
-df_melted['y'] = df_melted['y'].round()
+    df_melted.dropna(subset=['y'], inplace=True)
+    df_melted['y'] = df_melted['y'].round()
     return df_melted
 
 # --- 예측 함수 ---
