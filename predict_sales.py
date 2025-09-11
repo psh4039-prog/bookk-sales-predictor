@@ -29,6 +29,10 @@ def preprocess_excel(file):
     df_pg.columns = ['연도'] + month_labels
     df_melted = df_pg.melt(id_vars='연도', var_name='월', value_name='매출')
     df_melted.dropna(inplace=True)
+    import numpy as np  # 이게 없다면 맨 위에서 함께 추가
+
+def preprocess_excel(uploaded_file):
+    ...
     df_melted['월'] = (
         df_melted['월']
         .astype(str)
@@ -37,6 +41,9 @@ def preprocess_excel(file):
         .replace('', np.nan)
         .dropna()
         .astype(int)
+    )
+    ...
+
     df_melted['연도'] = df_melted['연도'].astype(int)
     df_melted['ds'] = pd.to_datetime(
         df_melted.rename(columns={'연도': 'year', '월': 'month'}).assign(day=1)[['year', 'month', 'day']]
